@@ -35,30 +35,32 @@ def get_args():
 
     parser.add_argument('--name', type=str, default=None, help='Experiment name. If None, model name is used.')
     parser.add_argument('--save_dir', type=str, default='experiments', help='Base directory for saving information.')
-    parser.add_argument('--dataset', type=str, default='cora',
+    parser.add_argument('--dataset', type=str, default='amazon-ratings',
                             choices=['cora', 'citeseer', 'pubmed','roman-empire', 'amazon-ratings', 'minesweeper', 'tolokers', 'questions',
                                     'squirrel', 'squirrel-directed', 'squirrel-filtered', 'squirrel-filtered-directed',
                                     'chameleon', 'chameleon-directed', 'chameleon-filtered', 'chameleon-filtered-directed',
                                     'actor', 'texas', 'texas-4-classes', 'cornell', 'wisconsin','computers','photo'])
     # model
     parser.add_argument('--model', type=str, default='GateMambaGCN',
-                        choices=['GateMambaGCN', 'GatedGCNLayer','GENConv','ResNet', 'APPNP'
+                        choices=['GateMambaGCN', 'GatedGCNLayer','GENConv','ResNet', 'APPNP',
                                  'GCN', 'SAGE','MixHop', 'GATv2','GAT', 'GAT-sep', 'GT', 'GT-sep'])
+    parser.add_argument('--model_path',type=str, default='./model')
     parser.add_argument('--save_model',action='store_true', default=False)
     # model architecture
-    parser.add_argument('--num_layers', type=int, default=6, help='Number of layers in the model.')
+    parser.add_argument('--num_layers', type=int, default=4, help='Number of layers in the model.')
     parser.add_argument('--hidden_dim', type=int, default=256, help=' modules input dimension.')
     parser.add_argument('--conv_layers', type=int, default=1, help='Number of conv layers in the GateMambaGCN.')
     parser.add_argument('--hidden_dim_multiplier', type=int, default=1, help='dim of edge encoder.')
-    parser.add_argument('--d_state', type=int, default=3, help='mamba dimension of the hidden state.')
+    parser.add_argument('--d_state', type=int, default=2, help='mamba dimension of the hidden state or Number of expert')
     parser.add_argument('--expand', action='store_true', default=False, help='Expand the model.')
-    parser.add_argument('--nb_heads', type=int, default=8, help='Number of head attentions.')
+    parser.add_argument('--top_k', type=int, default=0.5, help='Number of topk expert.')
     parser.add_argument('--normalization', type=str, default='LayerNorm', help='Use Layer normalization.')
     parser.add_argument('--seed', type=str, default=0, help='Use batch normalization.')
+    parser.add_argument('--nb_heads', type=int, default=8, help='Number of head attentions.')
     # dataset
-    parser.add_argument('--run_multiple_splits', type=list, default=[],
+    parser.add_argument('--run_multiple_splits', type=list, default=[0,1,2,3,4,5,6,7,8,9],
                         help='[0,1,2,3,4,5,6,7,8,9]: ten times standard split. []: ten times seed of first split')
-    parser.add_argument('--data_split_mode', type=str, default='random',
+    parser.add_argument('--data_split_mode', type=str, default='standard',
                         choices=['standard', 'random', 'cv-'],
                         help='Mode for splitting the dataset into train/val/test splits.')
     parser.add_argument('--data_task', type=str, default='node', choices=['node', 'graph'],help='Task type for the dataset.')
@@ -70,31 +72,29 @@ def get_args():
     parser.add_argument('--do_not_use_original_features', default=False, action='store_true')
 
     parser.add_argument('--num_steps', type=int, default=1000)
-    parser.add_argument('--device', type=str, default='cuda:0')
+    parser.add_argument('--device', type=str, default='cuda:0') 
     parser.add_argument('--amp', default=False, action='store_true')
     parser.add_argument('--verbose', default=False, action='store_true')
 
     # regularization
-    parser.add_argument('--dropout1', type=float, default=0.8, help='Dropout rate (1 - keep probability).')
-    parser.add_argument('--dropout2', type=float, default=0.0, help='Dropout rate (1 - keep probability).')
-    parser.add_argument('--weight_decay', type=float, default=0.0001, help='Weight decay (L2 loss on parameters).')
+    parser.add_argument('--dropout1', type=float, default=0.1, help='Dropout rate (1 - keep probability).')
+    parser.add_argument('--dropout2', type=float, default=0.1, help='Dropout rate (1 - keep probability).')
+    parser.add_argument('--weight_decay', type=float, default=0.001, help='Weight decay (L2 loss on parameters).')
 
     # training parameters
     parser.add_argument('--lr', type=float, default=0.001, help='Initial learning rate.')
-    parser.add_argument('--num_runs', type=int, default=10)
+    parser.add_argument('--num_runs', type=int, default=1) 
     parser.add_argument('--patience', type=int, default=200, help='Patience for early stopping.')
     parser.add_argument('--num_warmup_steps', type=int, default=None, help='If None, warmup_proportion is used instead.')
     parser.add_argument('--warmup_proportion', type=float, default=0.0, help='Only used if num_warmup_steps is None.')
     parser.add_argument('--test', action='store_true', default=True)
     parser.add_argument('--dt_init', type=str, default='constant', choices=['random', 'constant'], help='Initialization method for time steps: random, constant')
     parser.add_argument('--pool', type=str, default='gcn', choices=['mean', 'max', 'min', 'sum', 'gcn'], help='Pooling method for node embeddings: mean, max, min, sum')
+    
     # Optuna Settings
     parser.add_argument('--optruns', type=int, default=2000)
     parser.add_argument('--path', type=str, default="")
     parser.add_argument('--Optuna_name', type=str, default="opt")
-    
-    # evaluation
-    # parser.add_argument('--metric', type=str, default='auc', choices=['auc','accuracy'],help='Evaluate every n epochs.')
     
     # APPNP
     parser.add_argument('--alpha', type=int, default=0.7, help='Number of propagation steps.')
@@ -130,7 +130,8 @@ def run_loop_settings(args):
         run_ids = [x for x in range(num_iterations)]
         # seeds = [5025,5154,5034,5085, 1074,132, 139, 5177,190,5267]
         # seeds = [0,1,2,3,4,5,6,7,8,9]
-        seeds=[1941488137,4198936517,983997847,4023022221,4019585660,2108550661,1648766618,629014539,3212139042,2424918363] # 别人
+        seeds=[1941488137,4198936517,983997847,4023022221,4019585660,2108550661,1648766618,629014539,3212139042,2424918363] # 别人 原
+        # seeds=[3212139042,4023022221, 1941488137,4198936517,983997847,4019585660,2108550661,1648766618,629014539,2424918363] # 别人 
     else:
         # 'multi-split' run mode
         if args.num_runs != 1:
@@ -140,7 +141,6 @@ def run_loop_settings(args):
         split_indices = args.run_multiple_splits
         run_ids = split_indices
         seeds = [args.seed] * num_iterations
-    # seeds = [0,1,2,3,4,5,6,7,8,9]
     return run_ids, seeds, split_indices
 def compute_metrics(args, logits, dataset):
     if args.dataset in ['cora','pubmed','citeseer','computers','photo']:
@@ -210,14 +210,16 @@ def search_hyper_params(trial: optuna.Trial):
     # lr = trial.suggest_categorical("lr", [1e-4])
     # d_state = trial.suggest_categorical("d_state", [4])
     # dropout = trial.suggest_float("dropout", 0.0, 0.9, step=0.1)
-    num_layers = trial.suggest_categorical("num_layers", [8])
-    dropout1 = trial.suggest_float("dropout1", 0.4, 0.5, step=0.1)
-    dropout2 = trial.suggest_float("dropout2", 0.4, 0.5, step=0.1)
-    weight_decay = trial.suggest_categorical("weight_decay", [0.001])
-    lr = trial.suggest_categorical("lr", [0.0005])
-    d_state = trial.suggest_categorical("d_state", [2,3,4])
-    hidden_dim = trial.suggest_categorical("hidden_dim", [128])
+    loop_num = trial.number
+    num_layers = trial.suggest_categorical("num_layers", [16])
+    dropout1 = trial.suggest_categorical("dropout1", [0, 0.5, 0.55, 0.6])
+    dropout2 = trial.suggest_categorical("dropout2", [0, 0.1, 0.15, 0.2])
+    weight_decay = trial.suggest_categorical("weight_decay", [0.0001])
+    lr = trial.suggest_categorical("lr", [0.001])
+    d_state = trial.suggest_categorical("d_state", [2])
+    hidden_dim = trial.suggest_categorical("hidden_dim", [256])
     return work(
+                loop_num,
                 hidden_dim,
                 dropout1,
                 dropout2,
@@ -227,6 +229,7 @@ def search_hyper_params(trial: optuna.Trial):
                 num_layers
                 )
 def work(
+        loop_num,
         hidden_dim,
         dropout1,
          dropout2,
@@ -245,6 +248,8 @@ def work(
     #args.num_warmup_steps = num_warmup_steps
     outs = []
     log_run = 0
+    
+        
     # Repeat for multiple experiment runs
     for run_id, seed, split_index in zip(*run_loop_settings(args)):
         args.split_index = split_index
@@ -252,10 +257,12 @@ def work(
         # print('seed:',seed)
         seed_everything(args.seed)
         dataset = DataLoader(args).to(torch.device(args.device))
+        
         seed_everything(0)
         if log_run == 0: 
             logger = Logger(args, metric=dataset.metric, num_data_splits=args.num_runs) 
         log_run = 1   
+        
         if  args.model == 'APPNP':
             model = APPNPModule(
                         num_layers=args.num_layers,
@@ -268,25 +275,26 @@ def work(
                         dropout2=args.dropout2)
         else:
             model = Model(model_name=args.model,
-                          dt_init = args.dt_init,
+                            dt_init = args.dt_init,
                         num_layers=args.num_layers,
                         input_dim=dataset.num_node_features,
+                        num_nodes=dataset.data.x.shape[0],
                         hidden_dim=args.hidden_dim,
                         conv_layes=args.conv_layers,
                         mamba_hidden_dim=args.d_state,
                         output_dim=dataset.num_targets,
                         hidden_dim_multiplier=args.hidden_dim_multiplier,
+                        top_k=args.top_k,
                         num_heads=args.nb_heads,
                         normalization=args.normalization,
                         dropout1=args.dropout1,
                         dropout2=args.dropout2,
                         pool=args.pool)
-
         
         model.to(args.device)
 
         parameter_groups = get_parameter_groups(model)
-        optimizer = torch.optim.AdamW(parameter_groups, lr=args.lr, weight_decay=args.weight_decay)
+        optimizer = torch.optim.AdamW(parameter_groups, lr=args.lr)
         scaler = GradScaler(enabled=args.amp)
         scheduler = get_lr_scheduler_with_warmup(optimizer=optimizer,                      # # 绑定的优化器（如Adam）
                                                  num_warmup_steps=args.num_warmup_steps,   # 预热步数
@@ -309,7 +317,6 @@ def work(
                 
         logger.finish_run(args)
         model.cpu()
-        torch.save(model.state_dict(), f"{args.dataset}_{run_id}.pt")
         outs.append(logger.test_metrics[-1])
         # dataset.next_data_split()
 
@@ -339,7 +346,7 @@ def main(k):
                         num_layers=args.num_layers,
                         input_dim=dataset.num_node_features,
                         hidden_dim=args.hidden_dim,
-                        alpha=args.alpha,
+                        alpha=args.alpha, 
                         output_dim=dataset.num_targets,
                         normalization=args.normalization,
                         dropout1=args.dropout1,
@@ -356,6 +363,7 @@ def main(k):
                         output_dim=dataset.num_targets,
                         hidden_dim_multiplier=args.hidden_dim_multiplier,
                         num_heads=args.nb_heads,
+                        top_k=args.top_k,
                         normalization=args.normalization,
                         dropout1=args.dropout1,
                         dropout2=args.dropout2,
@@ -364,7 +372,7 @@ def main(k):
         model.to(args.device)
 
         parameter_groups = get_parameter_groups(model)
-        optimizer = torch.optim.AdamW(parameter_groups, lr=args.lr, weight_decay=args.weight_decay)
+        optimizer = torch.optim.AdamW(parameter_groups, lr=args.lr)
         scaler = GradScaler(enabled=args.amp)
         scheduler = get_lr_scheduler_with_warmup(optimizer=optimizer,                      # # 绑定的优化器（如Adam）
                                                  num_warmup_steps=args.num_warmup_steps,   # 预热步数
@@ -405,8 +413,8 @@ def main(k):
                 # progress_bar.set_postfix({metric: f'{value:.4f}' for metric, value in metrics.items()})
                 
         logger.finish_run(args)
-        model.cpu()
         
+        model.cpu()
         # dataset.next_data_split()
 
     logger.print_metrics_summary(args)
@@ -415,7 +423,9 @@ def main(k):
 
 if __name__ == '__main__':
     # Load cmd line args
+    
     args = get_args()
+    
     if args.test:
         for i in range(10):
             main(i)
